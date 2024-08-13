@@ -12,17 +12,36 @@ namespace mra {
         using tensor_type = Tensor<T,NDIM>;
         static constexpr bool is_function_node = true;
         key_type key; //< Key associated with this node to facilitate computation from otherwise unknown parent/child
-        mutable T sum; //< If recurring up tree (e.g., in compress) can use this to also compute a scalar reduction
-        bool is_leaf; //< True if node is leaf on tree (i.e., no children).
+        mutable T sum = 0.0; //< If recurring up tree (e.g., in compress) can use this to also compute a scalar reduction
+        bool is_leaf = false; //< True if node is leaf on tree (i.e., no children).
+        std::array<bool, Key<NDIM>::num_children> is_child_leaf = { false };
         tensor_type coeffs; //< if !is_leaf these are junk (and need not be communicated)
         FunctionReconstructedNode() = default; // Default initializer does nothing so that class is POD
-        FunctionReconstructedNode(const Key<NDIM>& key) : key(key), sum(0.0), is_leaf(false) {}
-        T normf() const {return (is_leaf ? coeffs.normf() : 0.0);}
+        FunctionReconstructedNode(const Key<NDIM>& key, std::size_t K)
+        : key(key)
+        {}
+        //T normf() const {return (is_leaf ? coeffs.normf() : 0.0);}
         bool has_children() const {return !is_leaf;}
-        /* TODO: should we make this a vector? */
-        std::array<tensor_type, 1 << NDIM> neighbor_coeffs;
-        std::array<bool, 1 << NDIM> is_neighbor_leaf;
-        std::array<T, 1 << NDIM> neighbor_sum;
+    };
+
+
+    template <typename T, Dimension NDIM>
+    class FunctionCompressedNode {
+    public: // temporarily make everything public while we figure out what we are doing
+        static constexpr bool is_function_node = true;
+        Key<NDIM> key; //< Key associated with this node to facilitate computation from otherwise unknown parent/child
+        std::array<bool, Key<NDIM>::num_children> is_child_leaf; //< True if that child is leaf on tree
+        Tensor<T,NDIM> coeffs; //< Always significant
+        FunctionCompressedNode(std::size_t K)
+        : coeffs(2*K)
+        { }
+        FunctionCompressedNode(const Key<NDIM>& key, std::size_t K)
+        : key(key)
+        , coeffs(2*K)
+        { }
+
+        //T normf() const {return coeffs.normf();}
+        bool has_children(size_t childindex) const {assert(childindex<Key<NDIM>::num_children); return !is_leaf[childindex];}
     };
 
 

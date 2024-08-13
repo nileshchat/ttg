@@ -293,3 +293,187 @@ void submit_fcoeffs_kernel(
    double* tmp,
    bool* is_leaf_scratch,
    cudaStream stream);
+
+
+
+
+/**
+ * Compress kernels
+ */
+
+template <typename T, Dimension NDIM, typename accumulatorT>
+__device__ void sumabssq(mra::TensorView<T, NDIM>& a, accumulatorT* sum) const {
+  int tid = threadIdx.x + blockIdx.y + blockIdx.z;
+  accumulatorT s = 0.0;
+  /* play it safe: set sum to zero before the atomic increments */
+  if (tid == 0) { *sum = 0.0; }
+  __syncthreads();
+  /* every thread computes a partial sum (likely 1 element only) */
+  mra::foreach_idx(a, [&](auto... idx) mutable {
+    accumulatorT x = a(idx...);
+    s += x*x;
+  });
+  /* accumulate thread-partial results into sum
+   * if we had shared memory we could use that here but for now run with atomics */
+  atomicAdd(sum, s);
+  __syncthreads();
+  return *sum;
+}
+
+template<typename T, mra::Dimsion NDIM>
+__global__ void compress_kernel(
+  mra::Key<NDIM> key,
+  T* p_ptr,
+  T* result_ptr,
+  const T* hgT_ptr,
+  T* tmp,
+  T* sumsqs, // sumsqs[0]: sum over sumsqs of p; sumsqs[1]: sumsq of result
+  const std::array<T*, mra::Key<NDIM>::num_children> in_ptrs,
+  std::size_t K)
+{
+  bool is_t0 = !!(threadIdx.x + threadIdx.y + threadIdx.z);
+  int blockid = blockIdx.x;
+  {   // Collect child coeffs and leaf info
+    /* construct tensors */
+    const size_t K2NDIM    = std::pow(  K,NDIM);
+    const size_t TWOK2NDIM = std::pow(2*K,NDIM);
+    auto s = mra::TensorView<T,NDIM>(&tmp[0], 2*K);
+    auto r = mra::TensorView<T,NDIM>(result_ptr, K);
+    auto p = mra::TensorView<T,NDIM>(p_ptr, K);
+    auto hgT = mra::TensorView<T,NDIM>(hgT_ptr, K);
+    auto workspace = mra::TensorView<T, NDIM>(&tmp[TWOK2NDIM], K);
+    auto child_slice = get_child_slice(key, K, blockid);
+    if (is_t0) {
+      sumsqs[0] = 0.0;
+    }
+    __
+    if (blockid < key.num_children) {
+      mra::TensorView<T, NDIM> in(in_ptrs[blockid], K);
+      sumabssq(in, &sums[blockid]);
+      s(child_slice) = in;
+      //filter<T,K,NDIM>(s,d);  // Apply twoscale transformation=
+      transform<NDIM>(s, hgT, r, workspace);
+    }
+    if (key.level() > 0 && blockid == 0) {
+      p = r(child_slice);
+      r(child_slice) = 0.0;
+      sumabssq(r, &sums[key.num_children]); // put result sumsq at the end
+    }
+  }
+}
+
+
+template<typename T, mra::Dimsion NDIM>
+void submit_compress_kernel(
+  mra::Key<NDIM> key,
+  mra::TensorView<T, NDIM>& p_view,
+  mra::TensorView<T, NDIM>& result_view,
+  const mra::TensorView<T, NDIM>& hgT_view,
+  T* tmp,
+  T* sumsqs,
+  const std::array<T*, mra::Key<NDIM>::num_children>& in_ptrs,
+  std::size_t K,
+  cudaStream stream)
+{
+  const std::size_t K = p_view.dim(0);
+  dim3 thread_dims = dim3(1);
+  if constexpr (NDIM >= 3) {
+    thread_dims = dim3(K, K, K);
+  } else if constexpr (NDIM == 2) {
+    thread_dims = dim3(K, K, 1);
+  } else if constexpr (NDIM == 1) {
+    thread_dims = dim3(K, 1, 1);
+  }
+
+  compress_kernel<<<key.num_children, thread_dims, 0, stream>>>(
+    key, p_view.data(), result_view.data(), hgT_view.data(), tmp, sumsqs, in_ptrs, K);
+}
+
+
+/* Instantiations for 1, 2, 3D */
+template
+void submit_compress_kernel<double, 1>(
+  mra::Key<1> key,
+  mra::TensorView<double, 1>& p_view,
+  mra::TensorView<double, 1>& result_view,
+  const mra::TensorView<double, 1>& hgT_view,
+  double* tmp,
+  const std::array<double*, mra::Key<1>::num_children>& in_ptrs,
+  std::size_t K,
+  cudaStream stream);
+
+template
+void submit_compress_kernel<double, 2>(
+  mra::Key<2> key,
+  mra::TensorView<double, 2>& p_view,
+  mra::TensorView<double, 2>& result_view,
+  const mra::TensorView<double, 2>& hgT_view,
+  double* tmp,
+  const std::array<double*, mra::Key<2>::num_children>& in_ptrs,
+  std::size_t K,
+  cudaStream stream);
+
+template
+void submit_compress_kernel<double, 3>(
+  mra::Key<3> key,
+  mra::TensorView<double, 3>& p_view,
+  mra::TensorView<double, 3>& result_view,
+  const mra::TensorView<double, 3>& hgT_view,
+  double* tmp,
+  const std::array<double*, mra::Key<3>::num_children>& in_ptrs,
+  std::size_t K,
+  cudaStream stream);
+
+
+/**
+ * kernel for reconstruct
+ */
+
+template<typename T, mra::Dimension NDIM>
+__global__ void reconstruct_kernel(
+  mra::Key<NDIM> key,
+  T* node_ptr,
+  T* r_ptr,
+  T* tmp,
+  T* hg_ptr,
+  std::size_t K)
+{
+  bool is_t0 = !!(threadIdx.x + threadIdx.y + threadIdx.z);
+  int blockid = blockIdx.x;
+
+  const size_t K2NDIM    = std::pow(  K,NDIM);
+  const size_t TWOK2NDIM = std::pow(2*K,NDIM);
+  auto r = mra::TensorView<T, NDIM>(r_ptr, K);
+  auto s = mra::TensorView<T, NDIM>(&tmp[0], 2*K);
+  auto workspace = mra::TensorView<T, NDIM>(&tmp[TWOK2NDIM], 2*K);
+  auto hg = mra::TensorView<T, NDIM>(hg_ptr, K);
+
+  auto child_slice = get_child_slice(key, K, blockid);
+  if (key.level() != 0 && blockid == 0) node.get().coeffs(child_slice) = from_parent;
+
+  FixedTensor<T,2*K,NDIM> s;
+  //unfilter<T,K,NDIM>(node.get().coeffs, s);
+  transform<NDIM>(node, hg, s, workspace);
+
+  /* TODO: split the kernel here and launch a kernel with 1<<NDIM blocks */
+  r.get().coeffs = T(0.0);
+  r.get().is_leaf = false;
+  //::send<1>(key, r, out); // Send empty interior node to result tree
+  bcast_keys[1].push_back(key);
+
+  KeyChildren<NDIM> children(key);
+  for (auto it=children.begin(); it!=children.end(); ++it) {
+      const Key<NDIM> child= *it;
+      r.get().key = child;
+      r.get().coeffs = s(child_slices[it.index()]);
+      r.get().is_leaf = node.get().is_leaf[it.index()];
+      if (r.get().is_leaf) {
+          //::send<1>(child, r, out);
+          bcast_keys[1].push_back(child);
+      }
+      else {
+          //::send<0>(child, r.coeffs, out);
+          bcast_keys[0].push_back(child);
+      }
+  }
+}

@@ -31,4 +31,29 @@ void submit_fcoeffs_kernel(
   bool* is_leaf_scratch,
   cudaStream stream);
 
+template<mra::Dimension NDIM>
+std::size_t compress_tmp_size(std::size_t K) {
+  const size_t TWOK2NDIM = std::pow(2*K,NDIM);
+  const size_t K2NDIM = std::pow(K,NDIM);
+  return (TWOK2NDIM) // s
+          + K2NDIM // workspace
+          + mra::Key<NDIM>::num_children() // sumsq for each child and result
+          ;
+}
+
+
+/* Explicitly instantiated for 1, 2, 3D */
+template<typename T, mra::Dimsion NDIM>
+void submit_compress_kernel(
+  mra::Key<NDIM> key,
+  mra::TensorView<T, NDIM>& p_view,
+  mra::TensorView<T, NDIM>& result_view,
+  const mra::TensorView<T, NDIM>& hgT_view,
+  T* tmp,
+  T* sumsqs,
+  const std::array<T*, mra::Key<NDIM>::num_children()>& in_ptrs,
+  std::size_t K,
+  cudaStream stream);
+
+
 #endif // HAVE_KERNELS_H

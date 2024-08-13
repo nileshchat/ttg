@@ -11,6 +11,59 @@
 
 namespace mra {
 
+
+  template<template<class, std::size_t> TensorViewT, typename T, Dimension NDIM, typename Fn>
+  void foreach_idx(const TensorViewT<T, NDIM>& t, Fn&& fn) {
+    static_assert(NDIM <= 3, "Missing implementation of foreach_idx for NDIM>3");
+#ifdef __CUDA_ARCH__
+    /* let's start simple: iterate sequentially over all but the fastest dimension and use threads in the last
+      *                     dimension to do the assignment in parallel. This should be revisited later.*/
+    static_assert(NDIM <= 3, "Missing implementation of operator= for NDIM>3");
+    if constexpr(NDIM == 3) {
+      for (std::size_t i = threadIdx.z; i < t.dim(0); i += blockDim.z) {
+        for (std::size_t j = threadIdx.y; j < t.dim(1); j += blockDim.y) {
+          for (std::size_t k = threadIdx.x; k < t.dim(2); k += blockDim.x) {
+            fn(i, j, k);
+          }
+        }
+      }
+    } else if constexpr (NDIM == 2) {
+      for (std::size_t i = threadIdx.z*blockDim.y + threadIdx.y; i < t.dim(0); i += blockDim.z*blockDim.y) {
+        for (std::size_t j = threadIdx.x; j < t.dim(1); j += blockDim.x) {
+          fn(i, j);
+        }
+      }
+    } else if constexpr(NDIM == 1) {
+      int tid = threadDim.x * ((threadDim.y*threadIdx.z) + threadIdx.y) + threadIdx.x;
+      for (size_t i = tid; i < t.dim(0); i += blockDim.x*blockDim.y*blockDim.z) {
+          fn(i);
+      }
+    }
+    __syncthreads();
+#else  // __CUDA_ARCH__
+    if constexpr(NDIM ==3) {
+      for (int i = 0; i < t.dim(0); ++i) {
+        for (int j = 0; j < t.dim(1); ++j) {
+          for (int k = 0; k < t.dim(2); ++k) {
+            fn(i, j, k);
+          }
+        }
+      }
+    } else if constexpr (NDIM ==2) {
+      for (int i = 0; i < t.dim(0); ++i) {
+        for (int j = 0; j < t.dim(1); ++j) {
+          fn(i, j);
+        }
+      }
+    } else if constexpr (NDIM ==1) {
+      for (int i = 0; i < t.dim(0); ++i) {
+        fn(i);
+      }
+    }
+#endif // __CUDA_ARCH__
+  }
+
+
   class Slice {
   public:
     static constexpr long END = std::numeric_limits<long>::max();
@@ -98,58 +151,6 @@ namespace mra {
       }
     }
 #endif // 0
-
-    template<typename Fn>
-    void foreach_idx(Fn&& fn) {
-      static_assert(ndim() <= 3, "Missing implementation of operator= for NDIM>3");
-#ifdef __CUDA_ARCH__
-      /* let's start simple: iterate sequentially over all but the fastest dimension and use threads in the last
-       *                     dimension to do the assignment in parallel. This should be revisited later.*/
-      static_assert(ndim() <= 3, "Missing implementation of operator= for NDIM>3");
-      if constexpr(ndim() == 3) {
-        for (std::size_t i = threadIdx.z; i < dims(0); i += blockDim.z) {
-          for (std::size_t j = threadIdx.y; j < dims(1); j += blockDim.y) {
-            for (std::size_t k = threadIdx.x; k < dims(2); k += blockDim.x) {
-              fn(i, j, k);
-            }
-          }
-        }
-      } else if constexpr (ndim() == 2) {
-        for (std::size_t i = threadIdx.z*blockDim.y + threadIdx.y; i < dims(0); i += blockDim.z*blockDim.y) {
-          for (std::size_t j = threadIdx.x; j < dims(1); j += blockDim.x) {
-            fn(i, j);
-          }
-        }
-      } else if constexpr(ndim() == 1) {
-        int tid = threadDim.x * ((threadDim.y*threadIdx.z) + threadIdx.y) + threadIdx.x;
-        for (size_t i = tid; i < dim(0); i += blockDim.x*blockDim.y*blockDim.z) {
-            fn(i);
-        }
-      }
-      __syncthreads();
-#else  // __CUDA_ARCH__
-      if constexpr(ndim() ==3) {
-        for (int i = 0; i < dim(0); ++i) {
-          for (int j = 0; j < dim(1); ++j) {
-            for (int k = 0; k < dim(2); ++k) {
-              fn(i, j, k);
-            }
-          }
-        }
-      } else if constexpr (ndim() ==2) {
-        for (int i = 0; i < dim(0); ++i) {
-          for (int j = 0; j < dim(1); ++j) {
-            fn(i, j);
-          }
-        }
-      } else if constexpr (ndim() ==1) {
-        for (int i = 0; i < dim(0); ++i) {
-          fn(i);
-        }
-      }
-#endif // __CUDA_ARCH__
-    }
-
 
     void reset(value_type *ptr, dims_array_t dims) {
       m_ptr = ptr;
@@ -250,7 +251,7 @@ namespace mra {
     /// Device: assumes this operation is called by all threads in a block, synchronizes
     /// Host: assumes this operation is called by a single CPU thread
     TensorView& operator=(const value_type& value) {
-      foreach_idx([&](auto... args){ this->operator()(args...) = value; });
+      foreach_idx(*this, [&](auto... args){ this->operator()(args...) = value; });
       return *this;
     }
 
@@ -258,7 +259,7 @@ namespace mra {
     /// Device: assumes this operation is called by all threads in a block, synchronizes
     /// Host: assumes this operation is called by a single CPU thread
     TensorView& operator*=(const value_type& value) {
-      foreach_idx([&](auto... args){ this->operator()(args...) *= value; });
+      foreach_idx(*this, [&](auto... args){ this->operator()(args...) *= value; });
       return *this;
     }
 
@@ -268,7 +269,7 @@ namespace mra {
     template <typename otherT>
     typename std::enable_if<otherT::is_tensor,TensorView&>::type
     operator=(const otherT& other) {
-      foreach_idx([&](auto... args){ this->operator()(args...) = other(args...); });
+      foreach_idx(*this, [&](auto... args){ this->operator()(args...) = other(args...); });
       return *this;
     }
 
@@ -316,60 +317,6 @@ namespace mra {
         }
       }
     }
-
-    /* Same as for TensorView but on different counts.
-     * TODO: Can we merge them? */
-    template<typename Fn>
-    void foreach_idx(Fn&& fn) {
-      static_assert(ndim() <= 3, "Missing implementation of operator= for NDIM>3");
-#ifdef __CUDA_ARCH__
-      /* let's start simple: iterate sequentially over all but the fastest dimension and use threads in the last
-       *                     dimension to do the assignment in parallel. This should be revisited later.*/
-      static_assert(ndim() <= 3, "Missing implementation of operator= for NDIM>3");
-      if constexpr(ndim() == 3) {
-        for (std::size_t i = threadIdx.z; i < m_slices[0].count; i += blockDim.z) {
-          for (std::size_t j = threadIdx.y; j < m_slices[1].count; j += blockDim.y) {
-            for (std::size_t k = threadIdx.x; k < m_slices[2].count; k += blockDim.x) {
-              fn(i, j, k);
-            }
-          }
-        }
-      } else if constexpr (ndim() == 2) {
-        for (std::size_t i = threadIdx.z*blockDim.y + threadIdx.y; i < m_slices[0].count; i += blockDim.z*blockDim.y) {
-          for (std::size_t j = threadIdx.x; j < m_slices[1].count; j += blockDim.x) {
-            fn(i, j);
-          }
-        }
-      } else if constexpr(ndim() == 1) {
-        int tid = threadDim.x * ((threadDim.y*threadIdx.z) + threadIdx.y) + threadIdx.x;
-        for (size_t i = tid; i < m_slices[0].count; i += blockDim.x*blockDim.y*blockDim.z) {
-            fn(i);
-        }
-      }
-      __syncthreads();
-#else  // __CUDA_ARCH__
-      if constexpr(ndim() ==3) {
-        for (int i = 0; i < m_slices[0].count; ++i) {
-          for (int j = 0; j < m_slices[1].count; ++j) {
-            for (int k = 0; k < m_slices[2].count; ++k) {
-              fn(i, j, k);
-            }
-          }
-        }
-      } else if constexpr (ndim() ==2) {
-        for (int i = 0; i < m_slices[0].count; ++i) {
-          for (int j = 0; j < m_slices[1].count; ++j) {
-            fn(i, j);
-          }
-        }
-      } else if constexpr (ndim() ==1) {
-        for (int i = 0; i < m_slices[1].count; ++i) {
-          fn(i);
-        }
-      }
-#endif // __CUDA_ARCH__
-    }
-
 
   public:
     TensorSlice() = delete; // slice is useless without a view
@@ -449,7 +396,7 @@ namespace mra {
     template <typename X=TensorSlice<TensorViewT>>
     typename std::enable_if<!std::is_const_v<TensorSlice>,X&>::type
     operator=(const value_type& value) {
-      foreach_idx([&](auto... args){ this->operator()(args...) = value; });
+      foreach_idx(*this, [&](auto... args){ this->operator()(args...) = value; });
       return *this;
     }
 
@@ -459,7 +406,7 @@ namespace mra {
     template <typename X=TensorSlice<TensorViewT>>
     typename std::enable_if<!std::is_const_v<TensorSlice>,X&>::type
     operator*=(const value_type& value) {
-      foreach_idx([&](auto... args){ this->operator()(args...) *= value; });
+      foreach_idx(*this, [&](auto... args){ this->operator()(args...) *= value; });
       return *this;
     }
 
@@ -468,7 +415,7 @@ namespace mra {
     /// Host: assumes this operation is called by a single CPU thread
     typename std::enable_if<!std::is_const_v<TensorViewT>,TensorSlice&>::type
     operator=(const TensorSlice& other) {
-      foreach_idx([&](auto... args){ this->operator()(args...) = other(args...); });
+      foreach_idx(*this, [&](auto... args){ this->operator()(args...) = other(args...); });
       return *this;
     }
   };
