@@ -6,6 +6,9 @@
 #include <array>
 
 #include <ttg.h>
+#include <ttg/serialization/madness.h>
+#include <ttg/serialization/std/array.h>
+#include <madness/world/world.h>
 
 #include "tensorview.h"
 
@@ -18,12 +21,15 @@ namespace mra {
     using size_type = std::size_t;
     using allocator_type = Allocator;
     using view_type = TensorView<value_type, NDIM>;
-    using const_view_type = TensorView<std::add_const_t<value_type>, NDIM>;
+    using const_view_type = std::add_const_t<TensorView<value_type, NDIM>>;
     using buffer_type = ttg::Buffer<value_type, allocator_type>;
 
     static constexpr Dimension ndim() { return NDIM; }
 
     using dims_array_t = std::array<size_type, ndim()>;
+
+    //template<typename Archive>
+    //friend madness::archive::ArchiveSerializeImpl<Archive, Tensor>;
 
   private:
     using ttvalue_type = ttg::TTValue<Tensor<T, NDIM, Allocator>>;
@@ -35,10 +41,22 @@ namespace mra {
       m_buffer.reset(size());
     }
 
+    template<std::size_t... Is>
+    static auto create_dims_array(std::size_t dim, std::index_sequence<Is...>) {
+      return std::array{(Is, dim)...};
+    }
+
   public:
     Tensor() = default;
 
-    template<typename... Dims>
+    /* generic */
+    explicit Tensor(std::size_t dim)
+    : ttvalue_type()
+    , m_dims(create_dims_array(dim, std::make_index_sequence<NDIM>{}))
+    , m_buffer(size())
+    { }
+
+    template<typename... Dims, typename = std::enable_if_t<(sizeof...(Dims) > 1)>>
     Tensor(Dims... dims)
     : ttvalue_type()
     , m_dims({static_cast<size_type>(dims)...})
@@ -104,11 +122,35 @@ namespace mra {
 
     /* returns a view for the current memory space
      * TODO: handle const correctness (const Tensor should return a const TensorView)*/
-    const_view_type current_view() const {
-      return const_view_type(m_buffer.current_device_ptr(), m_dims);
+    const view_type current_view() const {
+      return view_type(m_buffer.current_device_ptr(), m_dims);
+    }
+
+    template <typename Archive>
+    void serialize(Archive &ar) {
+      ar &m_dims &m_buffer;
+    }
+
+    template <typename Archive>
+    void serialize(Archive &ar, const unsigned int) {
+      serialize(ar);
     }
   };
 
 } // namespace mra
 
+
+// TODO: how is this supposed to work?
+#if 0
+/* Make the Tensor serializable */
+namespace madness::archive {
+  template <class Archive, typename T, mra::Dimension NDIM>
+  struct ArchiveSerializeImpl<Archive, mra::Tensor<T, NDIM>> {
+    static inline void serialize(const Archive& ar, mra::Tensor<T, NDIM>& obj) {
+      ar& obj.m_dims;
+      ar& obj.m_buffer;
+    };
+  };
+}  // namespace madness::archive
+#endif // 0
 #endif // TTG_MRA_TENSOR_H

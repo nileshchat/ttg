@@ -64,7 +64,12 @@ if (TTG_HAVE_CUDA)
                      madness/mra-device/mrattg-device.cc
                      madness/mra-device/gl.cc
                      madness/mra-device/mrattg-device.cc
-                     madness/mra-device/kernels.cu RUNTIMES "parsec")
+                     madness/mra-device/kernels.cu
+                     mratwoscale.cc
+                     COMPILE_DEFINITIONS TTG_ENABLE_CUDA=1
+                     COMPILE_OPTIONS $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+                     LINK_LIBRARIES MADworld
+                     RUNTIMES "parsec")
 endif (TTG_HAVE_CUDA)
 
 if (TARGET MADworld)
