@@ -29,6 +29,7 @@
 #include "ttg/terminal.h"
 #include "ttg/tt.h"
 #include "ttg/util/env.h"
+#include "ttg/util/finally.h"
 #include "ttg/util/hash.h"
 #include "ttg/util/meta.h"
 #include "ttg/util/meta/callable.h"
