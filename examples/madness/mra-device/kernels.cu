@@ -7,8 +7,7 @@
 #include "gl.h"
 #include "kernels.h"
 #include "functions.h"
-
-//#include "gl.cu"
+#include "util.h"
 
 template<typename T>
 struct type_printer;
@@ -17,7 +16,7 @@ using namespace mra;
 
 /// Set X(d,mu) to be the mu'th quadrature point in dimension d for the box described by key
 template<typename T, Dimension NDIM>
-__device__ void make_quadrature_pts(
+SCOPE void make_quadrature_pts(
   const Domain<NDIM>& D,
   const T* gldata,
   const Key<NDIM>& key,
@@ -31,7 +30,6 @@ __device__ void make_quadrature_pts(
   /* retrieve x[] from constant memory, use float */
   const T *x, *w;
   detail::GLget(gldata, &x, &w, K);
-#ifdef __CUDA_ARCH__
   if (threadIdx.z == 0) {
     for (int d = threadIdx.y; d < X.dim(0); d += blockDim.y) {
       T lo, hi; std::tie(lo,hi) = D.get(d);
@@ -42,16 +40,7 @@ __device__ void make_quadrature_pts(
     }
   }
   /* wait for all to complete */
-  __syncthreads();
-#else  // __CUDA_ARCH__
-  for (Dimension d : range(NDIM)) {
-    T lo, hi; std::tie(lo,hi) = D.get(d);
-    T width = h*D.get_width(d);
-    for (size_t i :  range(X.dim(1))) {
-      X(d,i) = lo + width*(l[d] + x[i]);
-    }
-  }
-#endif // __CUDA_ARCH__
+  SYNCTHREADS();
 }
 
 
@@ -69,7 +58,7 @@ __device__ void make_quadrature_pts(
 
 
 template <typename functionT, typename T, Dimension NDIM>
-__device__ bool is_negligible(
+SCOPE bool is_negligible(
   const functionT& f,
   const std::pair<Coordinate<T,NDIM>, Coordinate<T,NDIM>>& box,
   T thresh)
@@ -79,39 +68,9 @@ __device__ bool is_negligible(
     else return false;
 }
 
-
-template <typename T, Dimension NDIM, typename accumulatorT>
-__device__ void sumabssq(const TensorView<T, NDIM>& a, accumulatorT* sum) {
-  int tid = threadIdx.x + blockIdx.y + blockIdx.z;
-  accumulatorT s = 0.0;
-  /* play it safe: set sum to zero before the atomic increments */
-  if (tid == 0) { *sum = 0.0; }
-  __syncthreads();
-  /* every thread computes a partial sum (likely 1 element only) */
-  foreach_idx(a, [&](auto... idx) mutable {
-    accumulatorT x = a(idx...);
-    s += x*x;
-  });
-  /* accumulate thread-partial results into sum
-   * if we had shared memory we could use that here but for now run with atomics
-   * NOTE: needs CUDA architecture 6.0 or higher */
-  atomicAdd_block(sum, s);
-  __syncthreads();
-}
-
-/// Compute Frobenius norm ... still needs specializing for complex
-template <typename T, Dimension NDIM, typename accumulatorT = T>
-__device__ accumulatorT tensor_normf(TensorView<T, NDIM>& a) {
-  __shared__ accumulatorT sum; // TODO: is that safe?
-  sumabssq<accumulatorT>(a, &sum);
-  __syncthreads();
-  return std::sqrt(sum);
-}
-
-
 /// Make outer product of quadrature points for vectorized algorithms
 template<typename T>
-__device__ void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
+SCOPE void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
                           std::integral_constant<Dimension, 1>) {
   /* uses threads in 3 dimensions */
   xvec = x;
@@ -120,7 +79,7 @@ __device__ void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
 
 /// Make outer product of quadrature points for vectorized algorithms
 template<typename T>
-__device__ void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
+SCOPE void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
                           std::integral_constant<Dimension, 2>) {
   const std::size_t K = x.dim(1);
   if (threadIdx.z == 0) {
@@ -132,12 +91,12 @@ __device__ void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
       }
     }
   }
-  __syncthreads();
+  SYNCTHREADS();
 }
 
 /// Make outer product of quadrature points for vectorized algorithms
 template<typename T>
-__device__ void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
+SCOPE void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
                           std::integral_constant<Dimension, 3>) {
   const std::size_t K = x.dim(1);
   for (size_t i=threadIdx.z; i<K; i += blockDim.z) {
@@ -150,12 +109,12 @@ __device__ void make_xvec(const TensorView<T,2>& x, TensorView<T,2>& xvec,
       }
     }
   }
-  __syncthreads();
+  SYNCTHREADS();
 }
 
 
 template <typename functorT, typename T, Dimension NDIM>
-__device__
+SCOPE
 void fcube(const Domain<NDIM>& D,
            const T* gldata,
            const functorT& f,
@@ -205,13 +164,13 @@ void fcube(const Domain<NDIM>& D,
       //throw "how did we get here?";
       // TODO: how to handle this?
     }
-    __syncthreads();
+    SYNCTHREADS();
   }
 }
 
 /* reference implementation, adapted from madness */
 template <typename aT, typename bT, typename cT>
-__device__
+SCOPE
 void mTxmq(std::size_t dimi, std::size_t dimj, std::size_t dimk,
            cT* __restrict__ c, const aT* a, const bT* b, std::ptrdiff_t ldb=-1) {
   if (ldb == -1) ldb=dimj;
@@ -230,10 +189,10 @@ void mTxmq(std::size_t dimi, std::size_t dimj, std::size_t dimk,
       }
     }
   }
-  __syncthreads();
+  SYNCTHREADS();
 }
 template <Dimension NDIM, typename T>
-__device__
+SCOPE
 void transform(const TensorView<T,NDIM>& t,
                const TensorView<T,2>& c,
                TensorView<T,NDIM>& result,
@@ -253,7 +212,7 @@ void transform(const TensorView<T,NDIM>& t,
 }
 
 template<Dimension NDIM>
-__device__
+SCOPE
 std::array<Slice, NDIM> get_child_slice(Key<NDIM> key, std::size_t K, int child) {
   std::array<Slice,NDIM> slices;
   for (size_t d = 0; d < NDIM; ++d) {
@@ -287,11 +246,11 @@ __global__ void fcoeffs_kernel1(
   auto x            = TensorView<T, 2   >(&tmp[TWOK2NDIM+4*K2NDIM + (NDIM*K2NDIM)], NDIM, K);
   auto phibar       = TensorView<T, 2   >(phibar_ptr, K, K);
   /* compute one child per block */
-  if (blockid < key.num_children) {
-    Key<NDIM> child = key.child_at(blockid);
+  for (int bid = blockid; bid < key.num_children; bid += gridDim.x) {
+    Key<NDIM> child = key.child_at(bid);
     fcube(D, gldata, f, child, thresh, child_values, K, x, x_vec);
     transform(child_values, phibar, r, workspace);
-    auto child_slice = get_child_slice<NDIM>(key, K, blockid);
+    auto child_slice = get_child_slice<NDIM>(key, K, bid);
     TensorSlice<TensorView<T, NDIM>> s = values(child_slice);
     s = r;
   }
@@ -331,7 +290,7 @@ __global__ void fcoeffs_kernel2(
   /* TensorView assignment synchronizes */
   if (tid == 0) {
     /* TODO: compute the norm across threads */
-    *is_leaf = (tensor_normf(r) < truncate_tol(key,thresh)); // test norm of difference coeffs
+    *is_leaf = (mra::normf(r) < truncate_tol(key,thresh)); // test norm of difference coeffs
   }
 }
 
@@ -368,10 +327,10 @@ void submit_fcoeffs_kernel(
   }
 
   /* launch one block per child */
-  fcoeffs_kernel1<<<key.num_children, thread_dims, 0, stream>>>(
+  CALL_KERNEL(fcoeffs_kernel1, key.num_children, thread_dims, 0, stream)(
     D, gldata, fn, key, tmp, phibar_view.data(), K, thresh);
   /* launch one block only */
-  fcoeffs_kernel2<<<1, thread_dims, 0, stream>>>(
+  CALL_KERNEL(fcoeffs_kernel2, 1, thread_dims, 0, stream)(
     D, key, coeffs_view.data(), hgT_view.data(),
     tmp, is_leaf_scratch, K, thresh);
 }
@@ -423,19 +382,20 @@ __global__ void compress_kernel(
     auto p = TensorView<T,NDIM>(p_ptr, K);
     auto hgT = TensorView<T,2>(hgT_ptr, K);
     auto workspace = TensorView<T, NDIM>(&tmp[TWOK2NDIM], K);
-    auto child_slice = get_child_slice<NDIM>(key, K, blockid);
     if (is_t0) {
       sumsqs[0] = 0.0;
     }
 
-    if (blockid < key.num_children) {
-      const TensorView<T, NDIM> in(in_ptrs[blockid], K);
-      sumabssq(in, &sumsqs[blockid]);
+    for (int bid = blockid; bid < key.num_children; bid += gridDim.x) {
+      auto child_slice = get_child_slice<NDIM>(key, K, bid);
+      const TensorView<T, NDIM> in(in_ptrs[bid], K);
+      sumabssq(in, &sumsqs[bid]);
       s(child_slice) = in;
       //filter<T,K,NDIM>(s,d);  // Apply twoscale transformation=
       transform<NDIM>(s, hgT, r, workspace);
     }
     if (key.level() > 0 && blockid == 0) {
+      auto child_slice = get_child_slice<NDIM>(key, K, 0);
       p = r(child_slice);
       r(child_slice) = 0.0;
       sumabssq(r, &sumsqs[key.num_children]); // put result sumsq at the end
@@ -464,7 +424,7 @@ void submit_compress_kernel(
     thread_dims = dim3(K, 1, 1);
   }
 
-  compress_kernel<<<key.num_children, thread_dims, 0, stream>>>(
+  CALL_KERNEL(compress_kernel, key.num_children, thread_dims, 0, stream)(
     key, p_view.data(), result_view.data(), hgT_view.data(), tmp, sumsqs, in_ptrs, K);
 }
 
@@ -496,8 +456,6 @@ __global__ void reconstruct_kernel(
   std::array<T*, (1<<NDIM) > r_arr,
   std::size_t K)
 {
-  int blockid = blockIdx.x;
-
   const size_t K2NDIM    = std::pow(  K,NDIM);
   const size_t TWOK2NDIM = std::pow(2*K,NDIM);
   auto node = TensorView<T, NDIM>(node_ptr, 2*K);
@@ -506,7 +464,7 @@ __global__ void reconstruct_kernel(
   auto hg = TensorView<T, 2>(hg_ptr, K);
   auto from_parent = TensorView<T, NDIM>(from_parent_ptr, K);
 
-  auto child_slice = get_child_slice<NDIM>(key, K, blockid);
+  auto child_slice = get_child_slice<NDIM>(key, K, 0);
   if (key.level() != 0) node(child_slice) = from_parent;
 
   //unfilter<T,K,NDIM>(node.get().coeffs, s);
@@ -533,6 +491,7 @@ void submit_reconstruct_kernel(
   cudaStream_t stream)
 {
   const std::size_t K = node.dim(0);
+  /* runs on a single block */
   dim3 thread_dims = dim3(1);
   if constexpr (NDIM >= 3) {
     thread_dims = dim3(K, K, K);
@@ -541,9 +500,7 @@ void submit_reconstruct_kernel(
   } else if constexpr (NDIM == 1) {
     thread_dims = dim3(K, 1, 1);
   }
-
-  /* runs on a single block */
-  reconstruct_kernel<<<1, thread_dims, 0, stream>>>(
+  CALL_KERNEL(reconstruct_kernel, 1, thread_dims, 0, stream)(
     key, node.data(), tmp, hg.data(), from_parent.data(), r_arr, K);
 }
 

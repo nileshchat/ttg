@@ -40,7 +40,7 @@ namespace mra {
           fn(i);
       }
     }
-    __syncthreads();
+    SYNCTHREADS();
 #else  // __CUDA_ARCH__
     if constexpr(NDIM ==3) {
       for (int i = 0; i < t.dim(0); ++i) {
@@ -63,6 +63,36 @@ namespace mra {
     }
 #endif // __CUDA_ARCH__
   }
+
+  namespace detail {
+
+    template <typename TensorT, size_t num_dimensions>
+    struct base_tensor_iterator {
+      size_t count;
+      const TensorT& t;
+      std::array<size_t,std::max(size_t(1),num_dimensions)> indx = {};
+
+      constexpr base_tensor_iterator (size_t count, const TensorT& t)
+      : count(count)
+      , t(t)
+      {}
+
+      void inc() {
+        assert(count < t.size());
+        count++;
+        for (int d=int(num_dimensions)-1; d>=0; --d) { // must be signed loop variable!
+          indx[d]++;
+          if (indx[d]<t.dim(d)) {
+            break;
+          } else {
+            indx[d] = 0;
+          }
+        }
+      }
+
+      const auto& index() const {return indx;}
+    };
+  } // namespace detail
 
 
   class Slice {
@@ -258,20 +288,6 @@ namespace mra {
       foreach_idx(*this, [&](auto... args){ this->operator()(args...) = other(args...); });
       return *this;
     }
-
-#if 0
-    /// Copy into patch
-    /// Device: assumes this operation is called by all threads in a block
-    /// Host: assumes this operation is called by a single CPU thread
-    template<typename TensorViewS>
-    std::enable_if_t<!std::is_const_v<TensorViewT>
-                     && TensorViewS::ndim() == ndim()
-                     && TensorViewS::is_tensor(), TensorSlice&>
-    SCOPE operator=(const TensorViewS& other) {
-      foreach_idx(*this, [&](auto... args){ this->operator()(args...) = other(args...); });
-      return *this;
-    }
-#endif // 0
 
     /// Copy into patch
     /// Defined below once we know TensorView
@@ -470,9 +486,46 @@ namespace mra {
       return TensorSlice<TensorView>(*this, slices);
     }
 
+
+    template<size_t ndimactive>
+    struct iterator : public detail::base_tensor_iterator<TensorView,ndimactive> {
+      iterator (size_t count, TensorView& t)
+      : detail::base_tensor_iterator<TensorView,ndimactive>(count, t)
+      { }
+      value_type& operator*() { return this->t.m_ptr[this->count]; }
+      iterator& operator++() {this->inc(); return *this;}
+      bool operator!=(const iterator& other) {return this->count != other.count;}
+      bool operator==(const iterator& other) {return this->count == other.count;}
+    };
+
+    template<size_t ndimactive>
+    struct const_iterator : public detail::base_tensor_iterator<TensorView,ndimactive> {
+      const_iterator (size_t count, const TensorView& t)
+      : detail::base_tensor_iterator<TensorView,ndimactive>(count, t)
+      { }
+      value_type operator*() const { return this->t.m_ptr[this->count]; }
+      const_iterator& operator++() {this->inc(); return *this;}
+      bool operator!=(const const_iterator& other) {return this->count != other.count;}
+      bool operator==(const const_iterator& other) {return this->count == other.count;}
+    };
+
+
+    /// Start for forward iteration through elements in row-major order --- this is convenient but not efficient
+    iterator<ndim()> begin() {return iterator<ndim()>(0, this);}
+
+    /// End for forward iteration through elements in row-major order --- this is convenient but not efficient
+    const iterator<ndim()>& end() { return iterator<ndim()>(0, this); }
+
+    /// Start for forward iteration through elements in row-major order --- this is convenient but not efficient
+    const_iterator<ndim()> begin() const { return const_iterator<ndim()>(0, this); }
+
+    /// End for forward iteration through elements in row-major order --- this is convenient but not efficient
+    const const_iterator<ndim()>& end() const { return const_iterator<ndim()>(size(), this); }
+
   private:
     dims_array_t m_dims;
     T *m_ptr; // may be const or non-const
+
   };
 
   template<typename TensorViewT>

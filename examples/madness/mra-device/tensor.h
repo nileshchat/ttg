@@ -137,20 +137,58 @@ namespace mra {
     }
   };
 
+  template <typename tensorT>
+  requires(tensorT::is_tensor)
+  std::ostream&
+  operator<<(std::ostream& s, const tensorT& t) {
+    if (t.size() == 0) {
+      s << "[empty tensor]\n";
+      return s;
+    }
+
+    const Dimension ndim = t.ndim();
+
+    auto dims = t.dims();
+    size_t maxdim = std::max_element(dims.begin(), dims.end());
+    size_t index_width = std::max(std::log10(maxdim), 6.0);
+    std::ios::fmtflags oldflags = s.setf(std::ios::scientific);
+    long oldprec = s.precision();
+    long oldwidth = s.width();
+
+    const Dimension lastdim = ndim-1;
+    const size_t lastdimsize = t.dim(lastdim);
+
+    for (auto it=t.begin(); it!=t.end(); ) {
+      const auto& index = it.index();
+      s.unsetf(std::ios::scientific);
+      s << '[';
+      for (Dimension d=0; d<(ndim-1); d++) {
+        s.width(index_width);
+        s << index[d];
+        s << ",";
+      }
+      s << " *]";
+      // s.setf(std::ios::scientific);
+      s.setf(std::ios::fixed);
+      for (size_t i=0; i<lastdimsize; ++i,++it) { //<<< it incremented here!
+        // s.precision(4);
+        s << " ";
+        //s.precision(8);
+        //s.width(12);
+        s.precision(6);
+        s.width(10);
+        s << *it;
+      }
+      s.unsetf(std::ios::scientific);
+      if (it != t.end()) s << std::endl;
+    }
+
+    s.setf(oldflags,std::ios::floatfield);
+    s.precision(oldprec);
+    s.width(oldwidth);
+
+    return s;
+  }
 } // namespace mra
 
-
-// TODO: how is this supposed to work?
-#if 0
-/* Make the Tensor serializable */
-namespace madness::archive {
-  template <class Archive, typename T, mra::Dimension NDIM>
-  struct ArchiveSerializeImpl<Archive, mra::Tensor<T, NDIM>> {
-    static inline void serialize(const Archive& ar, mra::Tensor<T, NDIM>& obj) {
-      ar& obj.m_dims;
-      ar& obj.m_buffer;
-    };
-  };
-}  // namespace madness::archive
-#endif // 0
 #endif // TTG_MRA_TENSOR_H

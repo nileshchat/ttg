@@ -73,6 +73,22 @@ int main(int argc, char **argv) {
     }
   }
 
+  /* test iterators */
+  auto m3 = matrix_type(4, 4);
+  auto m3v = m3.current_view();
+  int c = 0;
+  /* fill */
+  for (int i = 0; i < m3v.dim(0); ++i) {
+    for (int j = 0; j < m3v.dim(1); ++j) {
+      m3v(i, j) = c++;
+    }
+  }
+  assert(c == 4*4);
+  c = 0;
+  for (auto& e : m3v) {
+    assert(e == c++);
+  }
+
   ttg::finalize();
 
 }

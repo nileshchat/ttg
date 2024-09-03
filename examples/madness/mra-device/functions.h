@@ -94,6 +94,53 @@ namespace mra {
 #endif // __CUDA_ARCH__
     }
 
+    template <typename T, Dimension NDIM, typename accumulatorT>
+    SCOPE void sumabssq(const TensorView<T, NDIM>& a, accumulatorT* sum) {
+#ifdef __CUDA_ARCH__
+      int tid = threadIdx.x + blockIdx.y + blockIdx.z;
+      accumulatorT s = 0.0;
+      /* play it safe: set sum to zero before the atomic increments */
+      if (tid == 0) { *sum = 0.0; }
+      /* wait for thread 0 */
+      SYNCTHREADS();
+      /* every thread computes a partial sum (likely 1 element only) */
+      foreach_idx(a, [&](auto... idx) mutable {
+        accumulatorT x = a(idx...);
+        s += x*x;
+      });
+      /* accumulate thread-partial results into sum
+       * if we had shared memory we could use that here but for now run with atomics
+       * NOTE: needs CUDA architecture 6.0 or higher */
+      atomicAdd_block(sum, s);
+      SYNCTHREADS();
+#else  // __CUDA_ARCH__
+      accumulatorT s = 0.0;
+      foreach_idx(a, [&](auto... idx) mutable {
+        accumulatorT x = a(idx...);
+        s += x*x;
+      });
+      *sum = s;
+#endif // __CUDA_ARCH__
+    }
+
+
+    /// Compute Frobenius norm ... still needs specializing for complex
+    template <typename T, Dimension NDIM, typename accumulatorT = T>
+    SCOPE accumulatorT normf(const TensorView<T, NDIM>& a) {
+#ifdef __CUDA_ARCH__
+      __shared__ accumulatorT sum;
+#else  // __CUDA_ARCH__
+      accumulatorT sum;
+#endif // __CUDA_ARCH__
+      sumabssq<accumulatorT>(a, &sum);
+#ifdef __CUDA_ARCH__
+      /* wait for all threads to contribute */
+      SYNCTHREADS();
+#endif // __CUDA_ARCH__
+      return std::sqrt(sum);
+    }
+
+
 } // namespace mra
 
 

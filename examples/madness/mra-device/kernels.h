@@ -7,9 +7,13 @@
 #include "key.h"
 #include "domain.h"
 #include "types.h"
+#include "ttg/device/device.h"
 
-#ifdef TTG_ENABLE_CUDA
+#if defined(TTG_ENABLE_CUDA)
 #include <cuda.h>
+typedef cudaStream_t stream_t;
+#elif defined(TTG_ENABLE_HOST)
+typedef decltype(ttg::device::current_stream()) stream_t;
 #else
 #warning Unknown device model, please add appropriate header includes!
 #endif
@@ -37,7 +41,7 @@ void submit_fcoeffs_kernel(
   T* tmp,
   bool* is_leaf_scratch,
   T thresh,
-  cudaStream_t stream);
+  stream_t stream);
 
 template<mra::Dimension NDIM>
 std::size_t compress_tmp_size(std::size_t K) {
@@ -60,7 +64,7 @@ void submit_compress_kernel(
   T* tmp,
   T* sumsqs,
   const std::array<const T*, mra::Key<NDIM>::num_children>& in_ptrs,
-  cudaStream_t stream);
+  stream_t stream);
 
 template<mra::Dimension NDIM>
 std::size_t reconstruct_tmp_size(std::size_t K) {
@@ -78,6 +82,6 @@ void submit_reconstruct_kernel(
   const mra::TensorView<T, NDIM>& from_parent,
   const std::array<T*, mra::Key<NDIM>::num_children>& r_arr,
   T* tmp,
-  cudaStream_t stream);
+  stream_t stream);
 
 #endif // HAVE_KERNELS_H

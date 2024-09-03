@@ -3,6 +3,7 @@
 
 #include "key.h"
 #include "tensor.h"
+#include "functions.h"
 
 namespace mra {
     template <typename T, Dimension NDIM>
@@ -76,6 +77,18 @@ namespace mra {
           serialize(ar);
         }
     };
+
+    template <typename T, Dimension NDIM, typename ostream>
+    ostream& operator<<(ostream& s, const FunctionReconstructedNode<T,NDIM>& node) {
+      s << "FunctionReconstructedNode(" << node.key << "," << node.is_leaf << "," << mra::normf(node.coeffs.current_view()) << ")";
+      return s;
+    }
+
+    template <typename T, Dimension NDIM, typename ostream>
+    ostream& operator<<(ostream& s, const FunctionCompressedNode<T,NDIM>& node) {
+      s << "FunctionCompressedNode(" << node.key << "," << mra::normf(node.coeffs.current_view()) << ")";
+      return s;
+    }
 
 } // namespace mra
 

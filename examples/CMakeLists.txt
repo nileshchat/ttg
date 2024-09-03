@@ -59,6 +59,15 @@ if (TARGET tiledarray)
 endif()
 
 add_ttg_executable(tensortest madness/mra-device/tests/tensor_test.cc)
+add_ttg_executable(mradevice-host
+                   madness/mra-device/mrattg-device.cc
+                   madness/mra-device/gl.cc
+                   madness/mra-device/mrattg-device.cc
+                   madness/mra-device/kernels.cc
+                   mratwoscale.cc
+                   COMPILE_DEFINITIONS TTG_ENABLE_HOST=1
+                   LINK_LIBRARIES MADworld
+                   RUNTIMES "parsec")
 if (TTG_HAVE_CUDA)
   add_ttg_executable(mradevice-cuda
                      madness/mra-device/mrattg-device.cc

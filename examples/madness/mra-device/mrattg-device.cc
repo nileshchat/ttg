@@ -12,6 +12,13 @@
 #include <ttg/serialization/backends.h>
 #include <ttg/serialization/std/array.h>
 
+#ifdef TTG_ENABLE_HOST
+#define TASKTYPE void
+#else
+#define TASKTYPE ttg::device::Task
+#endif
+
+
 constexpr const ttg::ExecutionSpace Space = ttg::ExecutionSpace::CUDA;
 
 template<typename FnT, typename T, mra::Dimension NDIM>
@@ -25,7 +32,7 @@ auto make_project(
 {
   /* create a non-owning buffer for domain and capture it */
   auto fn = [&, db = ttg::Buffer<mra::Domain<NDIM>>(&domain), gl = mra::detail::GLbuffer<T>()]
-            (const mra::Key<NDIM>& key) -> ttg::device::Task {
+            (const mra::Key<NDIM>& key) -> TASKTYPE {
     using tensor_type = typename mra::Tensor<T, NDIM>;
     using key_type = typename mra::Key<NDIM>;
     using node_type = typename mra::FunctionReconstructedNode<T, NDIM>;
@@ -155,7 +162,7 @@ static auto make_compress(
                          const mra::FunctionReconstructedNode<T,NDIM> &in4,
                          const mra::FunctionReconstructedNode<T,NDIM> &in5,
                          const mra::FunctionReconstructedNode<T,NDIM> &in6,
-                         const mra::FunctionReconstructedNode<T,NDIM> &in7) -> ttg::device::Task {
+                         const mra::FunctionReconstructedNode<T,NDIM> &in7) -> TASKTYPE {
     //const typename ::detail::tree_types<T,K,NDIM>::compress_in_type& in,
     //typename ::detail::tree_types<T,K,NDIM>::compress_out_type& out) {
       constexpr const auto num_children = mra::Key<NDIM>::num_children;
@@ -238,7 +245,7 @@ auto make_reconstruct(
 
   auto do_reconstruct = [&](const mra::Key<NDIM>& key,
                             mra::FunctionCompressedNode<T, NDIM>&& node,
-                            const mra::Tensor<T, NDIM>& from_parent) -> ttg::device::Task {
+                            const mra::Tensor<T, NDIM>& from_parent) -> TASKTYPE {
     const std::size_t K = from_parent.dim(0);
     const std::size_t tmp_size = reconstruct_tmp_size<NDIM>(K);
     auto tmp = std::make_unique_for_overwrite<T[]>(tmp_size);
@@ -249,7 +256,7 @@ auto make_reconstruct(
     auto r_empty = mra::FunctionReconstructedNode<T,NDIM>(key, K);
     r_empty.coeffs.current_view() = T(0.0);
     r_empty.is_leaf = false;
-    // forward() returns a vector we push in
+    // forward() returns a vector that we can push in later
     auto sends = ttg::device::forward(ttg::device::send<1>(key, std::move(r_empty)));
 
     /* populate the vector of r's */
@@ -279,7 +286,9 @@ auto make_reconstruct(
       return ttg::device::select(hg.buffer(), node.coeffs.buffer(), tmp_scratch, (r_arr[Is].coeffs.buffer())...);
     };
     /* select a device */
+#ifndef TTG_ENABLE_HOST
     co_await do_select(std::make_index_sequence<key.num_children>{});
+#endif
 
     // helper lambda to pick apart the std::array
     auto assemble_tensor_ptrs = [&]<std::size_t... Is>(std::index_sequence<Is...>){
@@ -291,7 +300,11 @@ auto make_reconstruct(
     auto from_parent_view = from_parent.current_view();
     submit_reconstruct_kernel(key, node_view, hg_view, from_parent_view,
                               r_ptrs, tmp_scratch.device_ptr(), ttg::device::current_stream());
+#ifndef TTG_ENABLE_HOST
     co_await std::move(sends);
+#else
+
+#endif // TTG_ENABLE_HOST
   };
 
 
@@ -305,6 +318,17 @@ auto make_reconstruct(
 }
 
 
+static std::mutex printer_guard;
+template <typename keyT, typename valueT>
+auto make_printer(const ttg::Edge<keyT, valueT>& in, const char* str = "", const bool doprint=true) {
+  auto func = [str,doprint](const keyT& key, auto& value, auto& out) {
+    if (doprint) {
+      std::lock_guard<std::mutex> obolus(printer_guard);
+      std::cout << str << " (" << key << "," << value << ")" << std::endl;
+    }
+  };
+  return ttg::make_tt(func, ttg::edges(in), ttg::edges(), "printer", {"input"});
+}
 
 template<typename T, mra::Dimension NDIM>
 void test(std::size_t K) {
@@ -323,10 +347,38 @@ void test(std::size_t K) {
   auto project = make_project(D, gauss_buffer, functiondata, T(1e-6), project_control, project_result);
   auto compress = make_compress(functiondata, project_result, compress_result);
   auto reconstruct = make_reconstruct(K, functiondata, compress_result, reconstruct_result);
+  auto printer =   make_printer(project_result,    "projected    ", false);
+  auto printer2 =  make_printer(compress_result,   "compressed   ", false);
+  auto printer3 =  make_printer(reconstruct_result,"reconstructed", false);
+
+  auto connected = make_graph_executable(project.get());
+  assert(connected);
+
+  std::chrono::time_point<std::chrono::high_resolution_clock> beg, end;
+  if (ttg::default_execution_context().rank() == 0) {
+      //std::cout << "Is everything connected? " << connected << std::endl;
+      //std::cout << "==== begin dot ====\n";
+      //std::cout << Dot()(start.get()) << std::endl;
+      //std::cout << "====  end dot  ====\n";
+
+      beg = std::chrono::high_resolution_clock::now();
+      // This kicks off the entire computation
+      project->invoke(mra::Key<NDIM>(0, {0}));
+  }
+  ttg::execute();
+  ttg::fence();
+
+  if (ttg::default_execution_context().rank() == 0) {
+    end = std::chrono::high_resolution_clock::now();
+    std::cout << "TTG Execution Time (milliseconds) : "
+              << (std::chrono::duration_cast<std::chrono::microseconds>(end - beg).count()) / 1000
+              << std::endl;
+  }
 }
 
 int main(int argc, char **argv) {
   ttg::initialize(argc, argv);
+  GLinitialize();
 
   test<double, 3>(10);
 
