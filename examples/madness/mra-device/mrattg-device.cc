@@ -358,7 +358,7 @@ void test(std::size_t K) {
   auto printer2 =  make_printer(compress_result,   "compressed   ", false);
   auto printer3 =  make_printer(reconstruct_result,"reconstructed", false);
 
-  auto connected = make_graph_executable(project.get());
+  auto connected = make_graph_executable(start.get());
   assert(connected);
 
   std::chrono::time_point<std::chrono::high_resolution_clock> beg, end;
