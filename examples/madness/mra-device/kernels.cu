@@ -391,9 +391,9 @@ __global__ void compress_kernel(
       const TensorView<T, NDIM> in(in_ptrs[bid], K);
       sumabssq(in, &sumsqs[bid]);
       s(child_slice) = in;
-      //filter<T,K,NDIM>(s,d);  // Apply twoscale transformation=
-      transform<NDIM>(s, hgT, r, workspace);
     }
+    //filter<T,K,NDIM>(s,d);  // Apply twoscale transformation=
+    transform<NDIM>(s, hgT, r, workspace);
     if (key.level() > 0 && blockid == 0) {
       auto child_slice = get_child_slice<NDIM>(key, K, 0);
       p = r(child_slice);
@@ -424,7 +424,7 @@ void submit_compress_kernel(
     thread_dims = dim3(K, 1, 1);
   }
 
-  CALL_KERNEL(compress_kernel, key.num_children, thread_dims, 0, stream)(
+  CALL_KERNEL(compress_kernel, 1, thread_dims, 0, stream)(
     key, p_view.data(), result_view.data(), hgT_view.data(), tmp, sumsqs, in_ptrs, K);
 }
 
