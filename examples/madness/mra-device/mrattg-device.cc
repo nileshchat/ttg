@@ -282,7 +282,9 @@ auto make_reconstruct(
 
     // helper lambda to pick apart the std::array
     auto do_select = [&]<std::size_t... Is>(std::index_sequence<Is...>){
-      return ttg::device::select(hg.buffer(), node.coeffs.buffer(), tmp_scratch, (r_arr[Is].coeffs.buffer())...);
+      return ttg::device::select(hg.buffer(), from_parent.buffer(),
+                                 node.coeffs.buffer(), tmp_scratch,
+                                 (r_arr[Is].coeffs.buffer())...);
     };
     /* select a device */
 #ifndef TTG_ENABLE_HOST
@@ -323,7 +325,7 @@ auto make_reconstruct(
   };
 
 
-  auto s = ttg::make_tt<>(std::move(do_reconstruct), ttg::edges(in, S), ttg::edges(S, out), name, {"input", "s"}, {"s", "output"});
+  auto s = ttg::make_tt<Space>(std::move(do_reconstruct), ttg::edges(in, S), ttg::edges(S, out), name, {"input", "s"}, {"s", "output"});
 
   if (ttg::default_execution_context().rank() == 0) {
     s->template in<1>()->send(mra::Key<NDIM>{0,{0}}, mra::Tensor<T,NDIM>(K)); // Prime the flow of scaling functions

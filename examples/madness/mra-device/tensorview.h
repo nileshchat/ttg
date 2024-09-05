@@ -337,6 +337,8 @@ namespace mra {
 #endif // 0
 
   public:
+    TensorView() = default; // needed for __shared__ construction
+
     template<typename... Dims>
     SCOPE explicit TensorView(T *ptr, Dims... dims)
     : m_dims({dims...})

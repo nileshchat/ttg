@@ -81,13 +81,13 @@ namespace mra {
 
     template <typename T, Dimension NDIM, typename ostream>
     ostream& operator<<(ostream& s, const FunctionReconstructedNode<T,NDIM>& node) {
-      s << "FunctionReconstructedNode(" << node.key << "," << node.is_leaf << "," << mra::normf(node.coeffs.current_view()) << ")";
+      s << "FunctionReconstructedNode(" << node.key << ", leaf " << node.is_leaf << ", norm " << mra::normf(node.coeffs.current_view()) << ")";
       return s;
     }
 
     template <typename T, Dimension NDIM, typename ostream>
     ostream& operator<<(ostream& s, const FunctionCompressedNode<T,NDIM>& node) {
-      s << "FunctionCompressedNode(" << node.key << "," << mra::normf(node.coeffs.current_view()) << ")";
+      s << "FunctionCompressedNode(" << node.key << ", norm " << mra::normf(node.coeffs.current_view()) << ")";
       return s;
     }
 

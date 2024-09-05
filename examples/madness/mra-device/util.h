@@ -17,8 +17,13 @@
 #endif // __CUDA_ARCH__
 
 #ifdef __CUDACC__
+#define checkSubmit() \
+  if (cudaPeekAtLastError() != cudaSuccess)                         \
+    std::cout << "kernel submission failed at " << __LINE__ << ": " \
+    << cudaGetErrorString(cudaPeekAtLastError()) << std::endl;
 #define CALL_KERNEL(name, ...) name<<<__VA_ARGS__>>>
 #else  // __CUDACC__
+#define checkSubmit()
 #define CALL_KERNEL(name, ...) name
 #endif // __CUDACC__
 
