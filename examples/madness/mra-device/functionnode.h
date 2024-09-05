@@ -21,6 +21,7 @@ namespace mra {
         FunctionReconstructedNode() = default; // Default initializer does nothing so that class is POD
         FunctionReconstructedNode(const Key<NDIM>& key, std::size_t K)
         : key(key)
+        , coeffs(K)
         {}
         //T normf() const {return (is_leaf ? coeffs.normf() : 0.0);}
         bool has_children() const {return !is_leaf;}
