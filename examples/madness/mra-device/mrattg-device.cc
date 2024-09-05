@@ -21,6 +21,12 @@
 
 constexpr const ttg::ExecutionSpace Space = ttg::ExecutionSpace::CUDA;
 
+template <mra::Dimension NDIM>
+auto make_start(const ttg::Edge<mra::Key<NDIM>, void>& ctl) {
+    auto func = [](const mra::Key<NDIM>& key) { ttg::sendk<0>(key); };
+    return ttg::make_tt<mra::Key<NDIM>>(func, ttg::edges(), edges(ctl), "start", {}, {"control"});
+}
+
 template<typename FnT, typename T, mra::Dimension NDIM>
 auto make_project(
   mra::Domain<NDIM>& domain,
@@ -110,7 +116,7 @@ auto make_project(
     ttg::send<1>(key, std::move(result)); // always produce a result
   };
 
-  return ttg::make_tt<Space>(std::move(fn), ttg::edges(control), ttg::edges(result));
+  return ttg::make_tt<Space>(std::move(fn), ttg::edges(control), ttg::edges(result), "project");
 }
 
 template<mra::Dimension NDIM, typename Value, std::size_t I, std::size_t... Is>
@@ -344,6 +350,7 @@ void test(std::size_t K) {
   auto gaussian = mra::Gaussian<T, NDIM>(D, T(3.0), {T(0.0),T(0.0),T(0.0)});
   // put it into a buffer
   auto gauss_buffer = ttg::Buffer<mra::Gaussian<T, NDIM>>(&gaussian);
+  auto start = make_start(project_control);
   auto project = make_project(D, gauss_buffer, functiondata, T(1e-6), project_control, project_result);
   auto compress = make_compress(functiondata, project_result, compress_result);
   auto reconstruct = make_reconstruct(K, functiondata, compress_result, reconstruct_result);
@@ -363,7 +370,7 @@ void test(std::size_t K) {
 
       beg = std::chrono::high_resolution_clock::now();
       // This kicks off the entire computation
-      project->invoke(mra::Key<NDIM>(0, {0}));
+      start->invoke(mra::Key<NDIM>(0, {0}));
   }
   ttg::execute();
   ttg::fence();
