@@ -46,11 +46,11 @@ namespace mra {
         void make_phi() {
             /* retrieve x, w from constant memory */
             const T *x, *w;
-            detail::GLget(&x, &w, K);
+            GLget(&x, &w, K);
             T* p = new T[K];
             auto phi_view = phi.current_view();
             for (std::size_t mu = 0; mu < K; ++mu) {
-                detail::legendre_scaling_functions(x[mu], K, &p[0]);
+                legendre_scaling_functions(x[mu], K, &p[0]);
                 for (std::size_t i = 0; i < K; ++i) {
                     phi_view(mu,i) = p[i];
                 }
@@ -62,11 +62,11 @@ namespace mra {
         void make_phibar() {
             /* retrieve x, w from constant memory */
             const T *x, *w;
-            detail::GLget(&x, &w, K);
+            GLget(&x, &w, K);
             T *p = new T[K];
             auto phibar_view = phibar.current_view();
             for (std::size_t mu = 0; mu < K; ++mu) {
-                detail::legendre_scaling_functions(x[mu], K, &p[0]);
+                legendre_scaling_functions(x[mu], K, &p[0]);
                 for (std::size_t i = 0; i < K; ++i) {
                     phibar_view(mu,i) = w[mu]*p[i];
                 }

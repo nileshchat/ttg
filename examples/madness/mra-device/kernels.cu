@@ -29,7 +29,7 @@ SCOPE void make_quadrature_pts(
   const T h = std::pow(T(0.5),T(n));
   /* retrieve x[] from constant memory, use float */
   const T *x, *w;
-  detail::GLget(gldata, &x, &w, K);
+  GLget(gldata, &x, &w, K);
   if (threadIdx.z == 0) {
     for (int d = threadIdx.y; d < X.dim(0); d += blockDim.y) {
       T lo, hi; std::tie(lo,hi) = D.get(d);

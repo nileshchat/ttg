@@ -31,7 +31,7 @@ auto make_project(
   ttg::Edge<mra::Key<NDIM>, mra::FunctionReconstructedNode<T, NDIM>> result)
 {
   /* create a non-owning buffer for domain and capture it */
-  auto fn = [&, db = ttg::Buffer<mra::Domain<NDIM>>(&domain), gl = mra::detail::GLbuffer<T>()]
+  auto fn = [&, db = ttg::Buffer<mra::Domain<NDIM>>(&domain), gl = mra::GLbuffer<T>()]
             (const mra::Key<NDIM>& key) -> TASKTYPE {
     using tensor_type = typename mra::Tensor<T, NDIM>;
     using key_type = typename mra::Key<NDIM>;
@@ -378,7 +378,7 @@ void test(std::size_t K) {
 
 int main(int argc, char **argv) {
   ttg::initialize(argc, argv);
-  GLinitialize();
+  mra::GLinitialize();
 
   test<double, 3>(10);
 
