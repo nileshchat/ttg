@@ -6,7 +6,7 @@
 #include <array>
 
 #include <ttg.h>
-#include <ttg/serialization/madness.h>
+#include <ttg/serialization.h>
 #include <ttg/serialization/std/array.h>
 #include <madness/world/world.h>
 
