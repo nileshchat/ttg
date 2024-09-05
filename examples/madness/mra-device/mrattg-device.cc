@@ -44,13 +44,14 @@ auto make_project(
     using node_type = typename mra::FunctionReconstructedNode<T, NDIM>;
     node_type result;
     tensor_type& coeffs = result.coeffs;
+    auto outputs = ttg::device::forward();
 
     if (key.level() < initial_level(f)) {
       std::vector<mra::Key<NDIM>> bcast_keys;
       /* TODO: children() returns an iteratable object but broadcast() expects a contiguous memory range.
                 We need to fix broadcast to support any ranges */
       for (auto child : children(key)) bcast_keys.push_back(child);
-      ttg::broadcastk<0>(bcast_keys);
+      outputs.push_back(ttg::device::broadcastk<0>(std::move(bcast_keys)));
       coeffs.current_view() = T(1e7); // set to obviously bad value to detect incorrect use
       result.is_leaf = false;
     }
@@ -110,13 +111,15 @@ auto make_project(
       if (!result.is_leaf) {
         std::vector<mra::Key<NDIM>> bcast_keys;
         for (auto child : children(key)) bcast_keys.push_back(child);
-        ttg::broadcastk<0>(bcast_keys);
+        outputs.push_back(ttg::device::broadcastk<0>(std::move(bcast_keys)));
       }
     }
-    ttg::send<1>(key, std::move(result)); // always produce a result
+    outputs.push_back(ttg::device::send<1>(key, std::move(result))); // always produce a result
+    co_await std::move(outputs);
   };
 
-  return ttg::make_tt<Space>(std::move(fn), ttg::edges(control), ttg::edges(result), "project");
+  ttg::Edge<mra::Key<NDIM>, void> refine("refine");
+  return ttg::make_tt<Space>(std::move(fn), ttg::edges(fuse(control, refine)), ttg::edges(refine,result), "project");
 }
 
 template<mra::Dimension NDIM, typename Value, std::size_t I, std::size_t... Is>
