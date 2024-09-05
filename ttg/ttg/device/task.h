@@ -474,7 +474,11 @@ namespace ttg::device {
   template <size_t i, typename rangeT,
             ttg::Runtime Runtime = ttg::ttg_runtime>
   inline detail::send_t broadcastk(rangeT &&keylist) {
-    return detail::send_t{detail::broadcastk_coro<i>(std::tie(keylist))};
+    if constexpr (std::is_rvalue_reference_v<decltype(keylist)>) {
+      return detail::send_t{detail::broadcastk_coro<i>(std::forward<rangeT>(keylist))};
+    } else {
+      return detail::send_t{detail::broadcastk_coro<i>(std::tie(keylist))};
+    }
   }
 
 
