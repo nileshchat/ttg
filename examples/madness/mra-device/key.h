@@ -4,14 +4,7 @@
 #include "types.h"
 #include "hash.h"
 #include "misc.h"
-
-
-#ifdef __CUDA_ARCH__
-#define SCOPE __device__ __host__
-#else
-#define SCOPE
-#endif
-
+#include "util.h"
 
 namespace mra {
 
