@@ -301,6 +301,7 @@ __global__ void fcoeffs_kernel2(
   /* TensorView assignment synchronizes */
   if (is_t0) {
     /* TODO: compute the norm across threads */
+    SYNCTHREADS();
     *is_leaf = (mra::normf(r) < truncate_tol(key,thresh)); // test norm of difference coeffs
   }
 }
