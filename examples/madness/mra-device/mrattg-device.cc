@@ -353,12 +353,22 @@ void test(std::size_t K) {
   mra::Domain<NDIM> D;
   D.set_cube(-6.0,6.0);
 
+  srand48(5551212); // for reproducible results
+  //for (auto i : range(10000)) drand48(); // warmup generator
+
   ttg::Edge<mra::Key<NDIM>, void> project_control;
   ttg::Edge<mra::Key<NDIM>, mra::FunctionReconstructedNode<T, NDIM>> project_result, reconstruct_result;
   ttg::Edge<mra::Key<NDIM>, mra::FunctionCompressedNode<T, NDIM>> compress_result;
 
   // define a Gaussian
-  auto gaussian = mra::Gaussian<T, NDIM>(D, T(3.0), {T(0.0),T(0.0),T(0.0)});
+  //auto gaussian = mra::Gaussian<T, NDIM>(D, T(3.0), {T(0.0),T(0.0),T(0.0)});
+  T expnt = 30000.0;
+  mra::Coordinate<T,NDIM> r;
+  for (size_t d=0; d<NDIM; d++) {
+    r[d] = T(-6.0) + T(12.0)*drand48();
+  }
+  auto gaussian = mra::Gaussian<T,NDIM>(D, expnt, r);
+
   // put it into a buffer
   auto gauss_buffer = ttg::Buffer<mra::Gaussian<T, NDIM>>(&gaussian);
   auto start = make_start(project_control);
