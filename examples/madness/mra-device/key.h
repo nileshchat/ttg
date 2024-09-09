@@ -123,7 +123,7 @@ namespace mra {
         /// Return the Key of the child at position idx \in [0, 1<<NDIM)
         SCOPE Key<NDIM> child_at(size_t idx) {
             assert(n<MAX_LEVEL);
-            assert(idx<NDIM);
+            assert(idx<num_children);
             std::array<Translation,NDIM> l = this->l;
             for (Dimension d = 0; d < NDIM; ++d) l[d] = 2*l[d] + (idx & (1<<d)) ? 1 : 0;
             return Key<NDIM>(2*n, l);
