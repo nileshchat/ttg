@@ -338,7 +338,7 @@ auto make_reconstruct(
 static std::mutex printer_guard;
 template <typename keyT, typename valueT>
 auto make_printer(const ttg::Edge<keyT, valueT>& in, const char* str = "", const bool doprint=true) {
-  auto func = [str,doprint](const keyT& key, auto& value, auto& out) {
+  auto func = [str,doprint](const keyT& key, const auto& value, auto& out) {
     if (doprint) {
       std::lock_guard<std::mutex> obolus(printer_guard);
       std::cout << str << " (" << key << "," << value << ")" << std::endl;
