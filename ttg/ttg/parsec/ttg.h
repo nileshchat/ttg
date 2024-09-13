@@ -939,8 +939,11 @@ namespace ttg_parsec {
       ttg_data_copy_t *copy_res = copy_in;
       bool replace = false;
       int32_t readers = copy_in->num_readers();
-
       assert(readers != 0);
+
+      /* try hard to defer writers if we cannot make copies
+       * if deferral fails we have to bail out */
+      bool defer_writer = (!std::is_copy_constructible_v<std::decay_t<Value>>) || task->defer_writer;
 
       if (readonly && !copy_in->is_mutable()) {
         /* simply increment the number of readers */
@@ -980,7 +983,7 @@ namespace ttg_parsec {
          *       (current task) or there are others, in which we case won't
          *       touch it.
          */
-        if (1 == copy_in->num_readers() && !task->defer_writer) {
+        if (1 == copy_in->num_readers() && !defer_writer) {
           /**
            * no other readers, mark copy as mutable and defer the release
            * of the task
@@ -990,9 +993,10 @@ namespace ttg_parsec {
           std::atomic_thread_fence(std::memory_order_release);
           copy_in->mark_mutable();
         } else {
-          if (task->defer_writer && nullptr == copy_in->get_next_task()) {
+          if (defer_writer && nullptr == copy_in->get_next_task()) {
             /* we're the first writer and want to wait for all readers to complete */
             copy_res->set_next_task(&task->parsec_task);
+            task->defer_writer = true;
           } else {
             /* there are writers and/or waiting already of this copy already, make a copy that we can mutate */
             copy_res = NULL;
@@ -3509,7 +3513,7 @@ namespace ttg_parsec {
     // Registers the callback for the i'th input terminal
     template <typename terminalT, std::size_t i>
     void register_input_callback(terminalT &input) {
-      using valueT = typename terminalT::value_type;
+      using valueT = std::decay_t<typename terminalT::value_type>;
       if (input.is_pull_terminal) {
         num_pullins++;
       }
