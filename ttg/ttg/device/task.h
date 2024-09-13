@@ -46,7 +46,7 @@ namespace ttg::device {
 
     template <typename... Ts>
     struct wait_kernel_t {
-      std::tuple<Ts &...> ties;
+      std::tuple<std::add_lvalue_reference_t<Ts>...> ties;
 
       /* always suspend */
       constexpr bool await_ready() const noexcept { return false; }

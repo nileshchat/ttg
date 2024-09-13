@@ -66,6 +66,7 @@ namespace ttg_parsec {
 #endif // PARSEC_HAVE_DEV_CUDA_SUPPORT
         //std::fprintf(stderr, "parsec_data_destroy %p device_copy[0] %p\n", data, data->device_copies[0]);
         //parsec_data_destroy(data);
+        // TODO: clean up all data copies here?
         assert(data->device_copies[0] != nullptr);
         auto copy = data->device_copies[0];
         parsec_data_copy_detach(data, data->device_copies[0], 0);
@@ -80,7 +81,7 @@ namespace ttg_parsec {
 
     protected:
 
-      /* remove the the data from the owning data copy */
+      /* remove the data from the owning data copy */
       void remove_from_owner();
 
       /* add the data to the owning data copy */
