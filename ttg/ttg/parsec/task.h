@@ -187,7 +187,10 @@ namespace ttg_parsec {
         parsec_task.chore_mask = 1<<0;
 
         // TODO: can we avoid this?
-        for (int i = 0; i < MAX_PARAM_COUNT; ++i) { this->parsec_task.data[i].data_in = nullptr; }
+        for (int i = 0; i < MAX_PARAM_COUNT; ++i) {
+          this->parsec_task.data[i].data_in  = nullptr;
+          this->parsec_task.data[i].data_out = nullptr;
+        }
       }
 
     public:
