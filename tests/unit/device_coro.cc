@@ -6,9 +6,17 @@
 
 #include "cuda_kernel.h"
 
-struct value_t {
+struct value_t : public ttg::TTValue<value_t> {
   ttg::Buffer<double> db; // TODO: rename
-  int quark;
+  int quark = 42;
+
+//#if 0
+  value_t(value_t&&) = default;
+  value_t& operator=(value_t&&) = default;
+  /* TODO: TTG should work on types that are not copyable and throw an exception if copy has to occur */
+  value_t(const value_t&) { throw std::runtime_error("invalid copy ctor"); }
+  value_t& operator=(const value_t&) { throw std::runtime_error("invalid copy operator"); }
+//#endif // 0
 
   template<typename Archive>
   void serialize(Archive& ar, const unsigned int version) {
@@ -445,23 +453,27 @@ TEST_CASE("Device", "coro") {
 
   SECTION("task-create-buffer") {
     ttg::Edge<int, value_t> e;
-    auto produce = [&]() -> ttg::device::Task {
-      auto value = value_t{};
+    auto produce = [&]() -> ttg::device::Task{
+      auto value = value_t(32);
       /* select device */
       co_await ttg::device::select(value.db);
       /* send value to another task */
-      co_await ttg::device::send<0>(0, std::move(value));
+      co_await ttg::device::forward(ttg::device::send<0>(0, std::move(value)));
     };
-    auto consume = [&](int key, value_t&& value) -> ttg::device::Task {
+    auto prod_tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(produce, ttg::edges(), ttg::edges(e));
+    //auto consume = [&](int key, value_t&& value) -> ttg::device::Task {
+    auto consume = [&](int key, const value_t& value) {
       /* nothing to be done here */
     };
-    auto prod_tt = ttg::make_tt(produce, ttg::edges(), ttg::edges(e));
-    auto cons_tt = ttg::make_tt(consume, ttg::edges(e), ttg::edges());
-    ttg::make_graph_executable(produce);
+    //auto cons_tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(consume, ttg::edges(e), ttg::edges());
+    auto cons1_tt = ttg::make_tt(consume, ttg::edges(e), ttg::edges());
+    auto cons2_tt = ttg::make_tt(consume, ttg::edges(e), ttg::edges());
+    ttg::make_graph_executable(prod_tt);
     ttg::execute(ttg::default_execution_context());
-    if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
+    if (ttg::default_execution_context().rank() == 0) prod_tt->invoke();
     ttg::ttg_fence(ttg::default_execution_context());
   }
+
 }
 
 #endif // TTG_IMPL_DEVICE_SUPPORT
