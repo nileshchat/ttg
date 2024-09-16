@@ -2,37 +2,56 @@
 #define MADGL_H_INCL
 
 #include <cstddef>
+#include <cassert>
 
-#ifdef __CUDA_ARCH__
-#define DEVICE __device__
-#else
-#define DEVICE
+#ifndef __CUDA_ARCH__
+#include "ttg/buffer.h"
 #endif // __CUDA_ARCH__
+
+#include "util.h"
 
 namespace mra {
 
-    namespace detail {
-        /// Get the points and weights for the Gauss-Legendre quadrature on [0,1].  x and w should be arrays length at least N.
-        DEVICE void GLget(size_t N, const double** x, const double** w);
+#ifndef __CUDA_ARCH__
+  namespace detail {
+    /// Arrays for points and weights for the Gauss-Legendre quadrature on [0,1].
+    /// only available directly on the host
+    extern const double gl_data[128][64];
+  } // namespace detail
 
-        /// Get the points and weights for the Gauss-Legendre quadrature on [0,1].  x and w should be arrays length at least N.
-        DEVICE void GLget(size_t N, const float** x, const float** w);
+  /**
+   * Host-side functions only
+   */
 
-        /// Evaluate the first k Legendre scaling functions. p should be an array of k elements.
-        void legendre_scaling_functions(double x, size_t k, double *p);
+  template<typename T>
+  inline ttg::Buffer<const T> GLbuffer() {
+    return ttg::Buffer<const T>(&detail::gl_data[0][0], sizeof(detail::gl_data)/sizeof(T));
+  }
 
-        /// Evaluate the first k Legendre scaling functions. p should be an array of k elements.
-        void legendre_scaling_functions(float x, size_t k, float *p);
+  template<typename T>
+  inline void GLget(const T** x, const T **w, std::size_t N) {
+    assert(N>0 && N<=64);
+    *x = &detail::gl_data[2*(N-1)  ][0];
+    *w = &detail::gl_data[2*(N-1)+1][0];
+  }
 
-        /// Get the points and weights for the Gauss-Legendre quadrature on [0,1]
-        template <typename T>
-        DEVICE void GLget(const T** x, const T** w, std::size_t N)  {
-            if (!(N>0 && N<=64)) {
-                throw std::runtime_error("Gauss-Legendre quadrature only available for up to N=64");
-            }
-            GLget(N, x, w);
-        }
-    }
-}
+  /// Evaluate the first k Legendre scaling functions. p should be an array of k elements.
+  void legendre_scaling_functions(double x, size_t k, double *p);
+
+  /// Evaluate the first k Legendre scaling functions. p should be an array of k elements.
+  void legendre_scaling_functions(float x, size_t k, float *p);
+
+  bool GLinitialize();
+#endif // __CUDA_ARCH__
+
+  template<typename T>
+  SCOPE void GLget(const T* glptr, const T** x, const T **w, std::size_t N) {
+    assert(N>0 && N<=64);
+    T (*data)[64] = (T(*)[64])glptr;
+    *x = &data[2*(N-1)  ][0];
+    *w = &data[2*(N-1)+1][0];
+  }
+
+} // namespace mra
 
 #endif

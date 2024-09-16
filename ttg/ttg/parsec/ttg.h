@@ -29,6 +29,7 @@
 #include "ttg/terminal.h"
 #include "ttg/tt.h"
 #include "ttg/util/env.h"
+#include "ttg/util/finally.h"
 #include "ttg/util/hash.h"
 #include "ttg/util/meta.h"
 #include "ttg/util/meta/callable.h"
@@ -938,8 +939,11 @@ namespace ttg_parsec {
       ttg_data_copy_t *copy_res = copy_in;
       bool replace = false;
       int32_t readers = copy_in->num_readers();
-
       assert(readers != 0);
+
+      /* try hard to defer writers if we cannot make copies
+       * if deferral fails we have to bail out */
+      bool defer_writer = (!std::is_copy_constructible_v<std::decay_t<Value>>) || task->defer_writer;
 
       if (readonly && !copy_in->is_mutable()) {
         /* simply increment the number of readers */
@@ -979,7 +983,7 @@ namespace ttg_parsec {
          *       (current task) or there are others, in which we case won't
          *       touch it.
          */
-        if (1 == copy_in->num_readers() && !task->defer_writer) {
+        if (1 == copy_in->num_readers() && !defer_writer) {
           /**
            * no other readers, mark copy as mutable and defer the release
            * of the task
@@ -989,9 +993,10 @@ namespace ttg_parsec {
           std::atomic_thread_fence(std::memory_order_release);
           copy_in->mark_mutable();
         } else {
-          if (task->defer_writer && nullptr == copy_in->get_next_task()) {
+          if (defer_writer && nullptr == copy_in->get_next_task()) {
             /* we're the first writer and want to wait for all readers to complete */
             copy_res->set_next_task(&task->parsec_task);
+            task->defer_writer = true;
           } else {
             /* there are writers and/or waiting already of this copy already, make a copy that we can mutate */
             copy_res = NULL;
@@ -1599,7 +1604,11 @@ namespace ttg_parsec {
       ttg::device::detail::device_task_promise_type& dev_data = dev_task.promise();
 
       /* for now make sure we're waiting for transfers and the coro hasn't skipped this step */
-      assert(dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_WAIT_TRANSFER);
+      if (dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_SENDOUT ||
+          dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_COMPLETE) {
+        /* the task jumped directly to send or returned so we're done */
+        return PARSEC_HOOK_RETURN_DONE;
+      }
 
       parsec_device_gpu_module_t *device = (parsec_device_gpu_module_t*)task->parsec_task.selected_device;
       assert(NULL != device);
@@ -3504,7 +3513,7 @@ namespace ttg_parsec {
     // Registers the callback for the i'th input terminal
     template <typename terminalT, std::size_t i>
     void register_input_callback(terminalT &input) {
-      using valueT = typename terminalT::value_type;
+      using valueT = std::decay_t<typename terminalT::value_type>;
       if (input.is_pull_terminal) {
         num_pullins++;
       }
@@ -3749,13 +3758,17 @@ namespace ttg_parsec {
           auto dev_data = dev_task.promise();
 
           /* for now make sure we're waiting for the kernel to complete and the coro hasn't skipped this step */
-          assert(dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_SENDOUT);
+          assert(dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_SENDOUT ||
+                 dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_COMPLETE);
 
           /* execute the sends we stored */
           if (dev_data.state() == ttg::device::detail::TTG_DEVICE_CORO_SENDOUT) {
             /* set the current task, needed inside the sends */
             detail::parsec_ttg_caller = task;
-            dev_data.do_sends();
+            auto old_output_tls_ptr = task->tt->outputs_tls_ptr_accessor();
+            task->tt->set_outputs_tls_ptr();
+            dev_data.do_sends(); // all sends happen here
+            task->tt->set_outputs_tls_ptr(old_output_tls_ptr);
             detail::parsec_ttg_caller = nullptr;
           }
         }

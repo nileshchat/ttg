@@ -40,6 +40,7 @@ template<typename T, typename Allocator>
 struct Buffer : public detail::ttg_parsec_data_wrapper_t
               , private Allocator {
 
+  using pointer_type = std::add_pointer_t<std::remove_all_extents_t<T>>;
   using element_type = std::decay_t<T>;
 
   using allocator_traits = std::allocator_traits<Allocator>;
@@ -97,10 +98,10 @@ public:
   /* Constructing a buffer using application-managed memory.
    * The memory pointed to by ptr must be accessible during
    * the life-time of the buffer. */
-  Buffer(element_type* ptr, std::size_t n = 1)
+  Buffer(pointer_type ptr, std::size_t n = 1)
   : ttg_parsec_data_wrapper_t()
   , allocator_type()
-  , m_host_data(ptr)
+  , m_host_data(const_cast<element_type*>(ptr)) // discard const
   , m_count(n)
   , m_owned(false)
   {

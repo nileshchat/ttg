@@ -16,7 +16,7 @@ include(AddTTGTestExecutable)
 macro(add_ttg_executable)
 
     set(optionArgs SINGLERANKONLY NOT_EXCLUDE_FROM_ALL)
-    set(multiValueArgs RUNTIMES LINK_LIBRARIES COMPILE_DEFINITIONS COMPILE_FEATURES TEST_CMDARGS)
+    set(multiValueArgs RUNTIMES LINK_LIBRARIES COMPILE_DEFINITIONS COMPILE_FEATURES COMPILE_OPTIONS TEST_CMDARGS)
     cmake_parse_arguments(ADD_TTG_EXECUTABLE "${optionArgs}" ""
             "${multiValueArgs}" ${ARGN})
 
@@ -68,6 +68,11 @@ macro(add_ttg_executable)
             list(APPEND _compile_features "${ADD_TTG_EXECUTABLE_COMPILE_FEATURES}")
         endif ()
 
+        set(_compile_options )
+        if (DEFINED ADD_TTG_EXECUTABLE_COMPILE_OPTIONS)
+            list(APPEND _compile_options "${ADD_TTG_EXECUTABLE_COMPILE_OPTIONS}")
+        endif ()
+
         if (NOT ADD_TTG_EXECUTABLE_NOT_EXCLUDE_FROM_ALL)
             add_executable(${_executable}-${r} EXCLUDE_FROM_ALL "${_sources_list}")
         else()
@@ -78,6 +83,10 @@ macro(add_ttg_executable)
         if (_compile_features)
             target_compile_features(${_executable}-${r} PRIVATE "${_compile_features}")
         endif (_compile_features)
+
+        if (_compile_options)
+            target_compile_options(${_executable}-${r} PRIVATE "${_compile_options}")
+        endif(_compile_options)
 
         set(_ranksrange 1)
         if (ADD_TTG_EXECUTABLE_SINGLERANKONLY)

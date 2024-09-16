@@ -6,9 +6,17 @@
 
 #include "cuda_kernel.h"
 
-struct value_t {
+struct value_t : public ttg::TTValue<value_t> {
   ttg::Buffer<double> db; // TODO: rename
-  int quark;
+  int quark = 42;
+
+//#if 0
+  value_t(value_t&&) = default;
+  value_t& operator=(value_t&&) = default;
+  /* TODO: TTG should work on types that are not copyable and throw an exception if copy has to occur */
+  value_t(const value_t&) { throw std::runtime_error("invalid copy ctor"); }
+  value_t& operator=(const value_t&) { throw std::runtime_error("invalid copy operator"); }
+//#endif // 0
 
   template<typename Archive>
   void serialize(Archive& ar, const unsigned int version) {
@@ -60,6 +68,7 @@ TEST_CASE("Device", "coro") {
 
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
+    ttg::execute(ttg::default_execution_context());
     ttg::make_graph_executable(tt);
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     std::cout << "Entering fence" << std::endl;
@@ -107,6 +116,7 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     value_t v;
     *v.db.host_ptr() = 2.0; // start from non-zero value
     if (ttg::default_execution_context().rank() == 0) tt->invoke(2, std::move(v));
@@ -152,6 +162,7 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
   }
@@ -194,6 +205,7 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
   }
@@ -236,6 +248,7 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
   }
@@ -286,6 +299,7 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
     if (num_iter == last_key) {
@@ -348,6 +362,7 @@ TEST_CASE("Device", "coro") {
     auto dtt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(device_fn, ttg::edges(h2d), ttg::edges(d2h),
                                                       "device_task", {"h2d"}, {"d2h"});
     ttg::make_graph_executable(dtt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) htt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
   }
@@ -389,6 +404,7 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
   }
@@ -430,9 +446,34 @@ TEST_CASE("Device", "coro") {
     auto tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(fn, ttg::edges(edge), ttg::edges(edge),
                                                       "device_task", {"edge_in"}, {"edge_out"});
     ttg::make_graph_executable(tt);
+    ttg::execute(ttg::default_execution_context());
     if (ttg::default_execution_context().rank() == 0) tt->invoke(0, value_t{});
     ttg::ttg_fence(ttg::default_execution_context());
   }
+
+  SECTION("task-create-buffer") {
+    ttg::Edge<int, value_t> e;
+    auto produce = [&]() -> ttg::device::Task{
+      auto value = value_t(32);
+      /* select device */
+      co_await ttg::device::select(value.db);
+      /* send value to another task */
+      co_await ttg::device::forward(ttg::device::send<0>(0, std::move(value)));
+    };
+    auto prod_tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(produce, ttg::edges(), ttg::edges(e));
+    //auto consume = [&](int key, value_t&& value) -> ttg::device::Task {
+    auto consume = [&](int key, const value_t& value) {
+      /* nothing to be done here */
+    };
+    //auto cons_tt = ttg::make_tt<ttg::ExecutionSpace::CUDA>(consume, ttg::edges(e), ttg::edges());
+    auto cons1_tt = ttg::make_tt(consume, ttg::edges(e), ttg::edges());
+    auto cons2_tt = ttg::make_tt(consume, ttg::edges(e), ttg::edges());
+    ttg::make_graph_executable(prod_tt);
+    ttg::execute(ttg::default_execution_context());
+    if (ttg::default_execution_context().rank() == 0) prod_tt->invoke();
+    ttg::ttg_fence(ttg::default_execution_context());
+  }
+
 }
 
 #endif // TTG_IMPL_DEVICE_SUPPORT

@@ -1,8 +1,8 @@
 #ifndef MADFUNCTIONDATA_H_INCL
 #define MADFUNCTIONDATA_H_INCL
 
-#include "../../mratypes.h"
-#include "../../mradomain.h"
+#include "types.h"
+#include "domain.h"
 #include "../../mratwoscale.h"
 #include "tensor.h"
 #include "gl.h"
@@ -25,9 +25,9 @@ namespace mra {
             auto r0_view = r0.current_view();
             auto rm_view = rm.current_view();
             auto rp_view = rp.current_view();
-            for (auto i: range(K)) {
+            for (std::size_t i = 0; i < K; ++i) {
                 double jphase = 1.0;
-                for (auto j : range(K)) {
+                for (std::size_t j = 0; j < K; ++j) {
                     double gammaij = std::sqrt(double((2*i+1)*(2*j+1)));
                     double Kij;
                     if (((i-j)>0) && (((i-j)%2)==1))
@@ -46,12 +46,12 @@ namespace mra {
         void make_phi() {
             /* retrieve x, w from constant memory */
             const T *x, *w;
-            detail::GLget(&x, &w, K);
+            GLget(&x, &w, K);
             T* p = new T[K];
             auto phi_view = phi.current_view();
-            for (size_t mu : range(K)) {
-                detail::legendre_scaling_functions(x[mu], K, &p[0]);
-                for (size_t i : range(K)) {
+            for (std::size_t mu = 0; mu < K; ++mu) {
+                legendre_scaling_functions(x[mu], K, &p[0]);
+                for (std::size_t i = 0; i < K; ++i) {
                     phi_view(mu,i) = p[i];
                 }
             }
@@ -62,12 +62,12 @@ namespace mra {
         void make_phibar() {
             /* retrieve x, w from constant memory */
             const T *x, *w;
-            detail::GLget(&x, &w, K);
+            GLget(&x, &w, K);
             T *p = new T[K];
             auto phibar_view = phibar.current_view();
-            for (size_t mu : range(K)) {
-                detail::legendre_scaling_functions(x[mu], K, &p[0]);
-                for (size_t i : range(K)) {
+            for (std::size_t mu = 0; mu < K; ++mu) {
+                legendre_scaling_functions(x[mu], K, &p[0]);
+                for (std::size_t i = 0; i < K; ++i) {
                     phibar_view(mu,i) = w[mu]*p[i];
                 }
             }
@@ -95,13 +95,18 @@ namespace mra {
             twoscale_get(K, HG.data());
             auto HG_view  = HG.current_view();
             auto HGT_view = HGT.current_view();
-            for (size_t i : range(2*K)) {
-                for (size_t j : range(2*K)) {
+            for (std::size_t i = 0; i < 2*K; ++i) {
+                for (std::size_t j = 0; j < 2*K; ++j) {
                     HGT_view(j,i) = HG_view(i,j);
                 }
             }
             make_abgv_diff_operator();
         }
+
+        FunctionData(FunctionData&&) = default;
+        FunctionData(const FunctionData&) = delete;
+        FunctionData& operator=(FunctionData&&) = default;
+        FunctionData& operator=(const FunctionData&) = delete;
 
         const auto& get_phi() const {return phi;}
         const auto& get_phibar() const {return phibar;}
@@ -110,37 +115,6 @@ namespace mra {
         const auto& get_rm() const {return rm;}
         const auto& get_r0() const {return r0;}
         const auto& get_rp() const {return rp;}
-
-        /// Set X(d,mu) to be the mu'th quadrature point in dimension d for the box described by key
-        void make_quadrature_pts(const Key<NDIM>& key, TensorView<T,2>& X) {
-            const Level n = key.level();
-            const std::array<Translation,NDIM>& l = key.translation();
-            const T h = std::pow(T(0.5),T(n));
-            /* retrieve x[] from constant memory */
-            const T *x, *w;
-            detail::GLget(&x, &w, K);
-#ifdef __CUDA_ARCH__
-            if (blockIdx.z == 0) {
-                for (int d = blockIdx.y; d < x.Dim(0); d += blockDim.y) {
-                    T lo, hi; std::tie(lo,hi) = Domain<NDIM>::get(d);
-                    T width = h*Domain<NDIM>::get_width(d);
-                    for (int i = blockIdx.x; i < X.dim(1); i += blockDim.y) {
-                        X(d,i) = lo + width*(l[d] + x[i]);
-                    }
-                }
-            }
-            /* wait for all to complete */
-            __syncthreads();
-#else  // __CUDA_ARCH__
-            for (Dimension d : range(NDIM)) {
-                T lo, hi; std::tie(lo,hi) = Domain<NDIM>::get(d);
-                T width = h*Domain<NDIM>::get_width(d);
-                for (size_t i :  X.dim(1)) {
-                    X(d,i) = lo + width*(l[d] + x[i]);
-                }
-            }
-#endif // __CUDA_ARCH__
-        }
     };
 
 }

@@ -18,6 +18,7 @@
 #include "ttg/tt.h"
 #include "ttg/util/bug.h"
 #include "ttg/util/env.h"
+#include "ttg/util/finally.h"
 #include "ttg/util/hash.h"
 #include "ttg/util/macro.h"
 #include "ttg/util/meta.h"
